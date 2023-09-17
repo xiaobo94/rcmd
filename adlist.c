@@ -134,7 +134,7 @@ listNode *listSearchKey(list *list, void *key)
 
   while (node) {
     if (list->match) {
-      if (list->match(node->value, key))
+      if (!list->match(node->value, key))
 	return node;
     } else {
       if (key == node->value)

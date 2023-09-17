@@ -72,7 +72,7 @@ typedef struct rcmdClient {
   robj *soft;
   robj *cmds;
   robj *contents;
-  dict *cmdTable;
+  list *cmdList;
   
   //  int flags;
 } rcmdClient;
@@ -98,7 +98,7 @@ struct rcmdServer {
   time_t lastSave;
   struct saveParam *saveParams;
   int saveParamsLen;
-  dict *cmdTable;
+  list *cmdList;
   
   //  int stat_numconnections;
 };
@@ -119,6 +119,7 @@ struct sharedObjectsStruct {
 static void oom(const char *msg);
 static robj *createObject(int type, void *ptr);
 static void decrRefCount(void *o);
+static int robjMatch(void *ptr, void *key);
 static void incrRefCount(robj *o);
 static void freeStringObject(robj *o);
 static void freeListObject(robj *o);
@@ -345,7 +346,7 @@ static void initServer() {
     if (!server.dict[i])
       oom("dictCreate");
   }
-  server.cmdTable = dictCreate(&hashDictType);
+  server.cmdList = listCreate();
   server.cronloops = 0;
   server.bgSaveInProgress = 0;
   aeCreateTimeEvent(server.el, 1000, serverCron, NULL, NULL);
@@ -615,7 +616,7 @@ static rcmdClient *createClient(int fd)
 
   if (!c) return NULL;
   selectDb(c, 0);
-  c->cmdTable = server.cmdTable;
+  c->cmdList = server.cmdList;
   c->fd = fd;
   c->querybuf = sdsEmpty();
   c->bulklen = -1;
@@ -625,6 +626,8 @@ static rcmdClient *createClient(int fd)
   if ((c->reply = listCreate()) == NULL)
     oom("listCreate");
   listSetFreeMethod(c->reply, decrRefCount);
+  listSetFreeMethod(c->cmdList, decrRefCount);
+  listSetMatchMethod(c->cmdList, robjMatch);
   if (aeCreateFileEvent(server.el, c->fd, AE_READABLE, readQueryFromClient, c, NULL) == AE_ERR) {
     freeClient(c);
     return NULL;
@@ -719,6 +722,12 @@ static void decrRefCount(void *obj)
     default: assert(0 != 0); break;
     }
   }
+}
+
+static int robjMatch(void *ptr, void *key)
+{
+  robj *p = ptr, *k = key;
+  return sdsCmp(p->ptr, k->ptr);
 }
 
 /* ============================ DB saving/loading ============================ */
@@ -920,8 +929,8 @@ static int loadDb(char *filename)
 
     k = createStringObject(key, klen);
     retval = dictAdd(d, k, o);
-    if (dictFind(server.cmdTable, k) == NULL)
-      dictAdd(server.cmdTable, k, k);
+    if (listSearchKey(server.cmdList, k) == NULL)
+      listAddNodeTail(server.cmdList, k);
     if (retval == DICT_ERR) {
       rcmdLog(RCMD_WARNING, "Loading DB, duplicated key found! Unrecoverable error, exiting now.");
       exit(1);
@@ -949,14 +958,17 @@ static int loadDb(char *filename)
 static void saddCommand(rcmdClient *c)
 {
   dictEntry *de = NULL;
+  listNode *ln = NULL;
   if (c->dict->size == 0 || (de = dictFind(c->dict, c->soft)) == NULL) {
-    //    c->soft = createListObject();
     c->cmds = createListObject();
+    listSetMatchMethod((list*)c->cmds->ptr, robjMatch);
     dictAdd(c->dict, c->soft, c->cmds);
-    dictAdd(c->cmdTable, c->soft, c->soft);
   } else if (de) {
     c->cmds = dictGetEntryVal(de);
-  } 
+  }
+
+  if ((ln = listSearchKey(c->cmdList, c->soft)) == NULL)
+    listAddNodeTail(c->cmdList, c->soft);
 
   listAddNodeTail(c->cmds->ptr, c->contents);
   server.dirty++;
@@ -1010,33 +1022,59 @@ static void saveCommand(rcmdClient *c)
 static void sdelCommand(rcmdClient *c)
 {
   dictEntry *de = NULL;
-
+  listNode *ln = NULL;
+  listIter *iter;
   if (c->dict->size == 0 || (de = dictFind(c->dict, c->soft)) == NULL) {
     return addReply(c, shared.err);
   } else if (de) {
     c->cmds = dictGetEntryVal(de);
-  }
-
-  listDelNode(c->cmds->ptr, listIndex(c->cmds->ptr, atoi((char*)c->argv[c->argc - 1])));
-
-  if (listLength((list*)c->cmds->ptr) == 0) {
-    if (dictDelete(c->cmdTable, de) == DICT_ERR || dictDelete(c->dict, de) == DICT_ERR)
+    if (listSearchKey((list*)c->cmds->ptr, c->soft) == NULL)
       return addReply(c, shared.err);
   }
 
+  //  listDelNode(c->cmds->ptr, listIndex(c->cmds->ptr, atoi((char*)c->argv[c->argc - 1])));
+
+  /*  if (listLength((list*)c->cmds->ptr) == 1) {
+    listDelNode(c->cmdList, listSearchKey(c->cmdList, c->soft));
+    if (dictDelete(c->dict, c->soft) == DICT_ERR)
+      return addReply(c, shared.err);
+      }*/
+  int idx = 0;
+  char *p = strchr((char*)c->argv[c->argc - 1]->ptr, ' ');
+  if (p) {
+    idx = atoi(p + 1);
+    iter = listGetIterator(c->cmds->ptr, AL_START_HEAD);
+  } else {
+    iter = listGetIterator(c->cmds->ptr, AL_START_TAIL);
+  }
+  while ((idx >= 0) && (ln = listNextElement(iter)) != NULL) {
+    if (!((list*)(c->cmds->ptr))->match(ln->value, c->soft)) {
+      idx--;
+    }
+  }
+  listDelNode(c->cmds->ptr, ln);
+
+  if (listSearchKey(c->cmds->ptr, c->soft) == NULL) {
+//    listRelease(c->cmds->ptr);
+//    c->cmds->ptr = NULL;
+    if (listLength((list*)c->cmds->ptr) == 0)
+      dictDelete(c->dict, c->soft);
+    listDelNode(c->cmdList, listSearchKey(c->cmdList, c->soft));
+  }
+    
   return addReply(c, shared.ok);
 }
 
 static void allCmdCommand(rcmdClient *c)
 {
-  dictEntry* de;
+  listNode *ln;
   robj *o;
   sds ret = sdsEmpty();
   int idx = 0;
-  dictIterator *iter = dictGetIterator(c->cmdTable);
+  listIter *iter = listGetIterator(c->cmdList, AL_START_HEAD);
 
-  while ((de = dictNext(iter))) {
-    o = dictGetEntryKey(de);
+  while ((ln = listNextElement(iter))) {
+    o = listNodeValue(ln);
     ret = sdsCatPrintf(ret, "%d: ", idx++);
     ret = sdsCat(ret, o->ptr);
     ret = sdsCat(ret, "\n");
