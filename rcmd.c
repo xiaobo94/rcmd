@@ -121,6 +121,7 @@ static robj *createObject(int type, void *ptr);
 static void decrRefCount(void *o);
 static void incrRefCount(robj *o);
 static void freeStringObject(robj *o);
+static void freeListObject(robj *o);
 static void addReply(rcmdClient *c, robj *obj);
 static void addReplySds(rcmdClient *c, sds s);
 static int loadDb(char *filename);
@@ -698,6 +699,11 @@ static void freeStringObject(robj *o)
   sdsFree(o->ptr);
 }
 
+static void freeListObject(robj *o)
+{
+  listRelease(o->ptr);
+}
+
 static void incrRefCount(robj *o)
 {
   o->refcount++;
@@ -709,6 +715,7 @@ static void decrRefCount(void *obj)
   if (--(o->refcount) == 0) {
     switch(o->type) {
     case RCMD_STRING: freeStringObject(o); break;
+    case RCMD_LIST: freeListObject(o); break;
     default: assert(0 != 0); break;
     }
   }
@@ -1011,6 +1018,12 @@ static void sdelCommand(rcmdClient *c)
   }
 
   listDelNode(c->cmds->ptr, listIndex(c->cmds->ptr, atoi((char*)c->argv[c->argc - 1])));
+
+  if (listLength((list*)c->cmds->ptr) == 0) {
+    if (dictDelete(c->cmdTable, de) == DICT_ERR || dictDelete(c->dict, de) == DICT_ERR)
+      return addReply(c, shared.err);
+  }
+
   return addReply(c, shared.ok);
 }
 
