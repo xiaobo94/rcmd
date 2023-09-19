@@ -904,6 +904,7 @@ static int loadDb(char *filename)
       if (fread(&listlen, 4, 1, fp) == 0) goto eoferr;
       listlen = ntohl(listlen);
       o = createListObject();
+      listSetMatchMethod((list*)o->ptr, robjMatch);
       while (listlen--) {
 	robj *ele;
 
