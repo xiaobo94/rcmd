@@ -47,8 +47,9 @@ static struct rcmdCommand cmdTable[] = {
 static sds saddCommand(list *rcmdList, list *execList)
 {
   sds cmd = sdsEmpty(), execcmd = sdsEmpty();
+  unsigned int j;
   
-  for (unsigned int j = 0; j < listLength(rcmdList); j++) {
+  for (j = 0; j < listLength(rcmdList); j++) {
     //if (j != 0) cmd = sdsCat(cmd, " ");
     cmd = sdsCatLen(cmd, (char*)listNodeValue(listIndex(rcmdList, j)), strlen((char*)listNodeValue(listIndex(rcmdList, j))));
     cmd = sdsCat(cmd, " ");
@@ -58,7 +59,7 @@ static sds saddCommand(list *rcmdList, list *execList)
   listAddNodeTail(execList, "\r\n");
   listAddNodeTail(execList, ret);
   
-  for (unsigned int j = 0; j < listLength(execList); j++) {
+  for (j = 0; j < listLength(execList); j++) {
     if (j != 0 && j < listLength(execList) - 2) execcmd = sdsCat(execcmd, " ");
     execcmd = sdsCatLen(execcmd, (char*)listNodeValue(listIndex(execList, j)), strlen((char*)listNodeValue(listIndex(execList, j))));
   }
@@ -74,7 +75,8 @@ static sds saddCommand(list *rcmdList, list *execList)
 static sds sgetCommand(list *rcmdList, list *execList)
 {
   sds cmd = sdsEmpty();
-  for (unsigned int j = 0; j < listLength(rcmdList); j++) {
+  unsigned int j;
+  for (j = 0; j < listLength(rcmdList); j++) {
     //if (j != 0) cmd = sdsCat(cmd, " ");
     cmd = sdsCatLen(cmd, (char*)listNodeValue(listIndex(rcmdList, j)), strlen((char*)listNodeValue(listIndex(rcmdList, j))));
     cmd = sdsCat(cmd, " ");
@@ -103,12 +105,13 @@ static sds saveCommand(list *rcmdList, list *execList)
 static sds sdelCommand(list *rcmdList, list *execList)
 {
   sds cmd = sdsEmpty(), execcmd = sdsEmpty();
-  for (unsigned int j = 0; j < listLength(rcmdList); j++) {
+  unsigned int j;
+  for (j = 0; j < listLength(rcmdList); j++) {
     cmd = sdsCatLen(cmd, (char*)listNodeValue(listIndex(rcmdList, j)), strlen((char*)listNodeValue(listIndex(rcmdList, j))));
     cmd = sdsCat(cmd, " ");
   }
 
-  for (unsigned int j = 0; j < listLength(execList); j++) {
+  for (j = 0; j < listLength(execList); j++) {
     if (j != 0 && j < listLength(execList))
       execcmd = sdsCat(execcmd, " ");
     execcmd = sdsCatLen(execcmd, (char*)listNodeValue(listIndex(execList, j)), strlen((char*)listNodeValue(listIndex(execList, j))));
@@ -157,7 +160,9 @@ static void parseArgs(int argc, char **argv, list* rcmdList, list* execList)
 {
   int execCMD = 0;
   listAddNodeTail(rcmdList, argv[1]);
-  for (int i = 2; i < argc; i++) {
+  int i;
+
+  for (i = 2; i < argc; i++) {
     if (startsWith(argv[i], "-") && execCMD == 0) {
       listAddNodeTail(rcmdList, argv[i]);
       listAddNodeTail(rcmdList, argv[++i]);

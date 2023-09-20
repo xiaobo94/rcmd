@@ -268,8 +268,9 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData)
   RCMD_NOTUSED(eventLoop);
   RCMD_NOTUSED(id);
   RCMD_NOTUSED(clientData);
+  int j;
 
-  for (int j = 0; j < server.dbnum; j++) {
+  for (j = 0; j < server.dbnum; j++) {
     size = dictGetHashTableSize(server.dict[j]);
     used = dictGetHashTableUsed(server.dict[j]);
     if (!(loops % 5) && used > 0) {
@@ -297,8 +298,9 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData)
       server.bgSaveInProgress = 0;
     }
   } else {
+    int j;
     time_t now = time(NULL);
-    for (int j = 0; j < server.saveParamsLen; j++) {
+    for (j = 0; j < server.saveParamsLen; j++) {
       struct saveParam *sp = server.saveParams + j;
 
       if (server.dirty >= sp->changes && now - server.lastSave > sp->seconds) {
@@ -341,7 +343,8 @@ static void initServer() {
   server.dict = malloc(sizeof(dict*) * server.dbnum);
   server.fd = aUnixDomainServer();
 
-  for (int i = 0; i < server.dbnum; i++) {
+  int i;
+  for (i = 0; i < server.dbnum; i++) {
     server.dict[i] = dictCreate(&hashDictType);
     if (!server.dict[i])
       oom("dictCreate");
@@ -364,7 +367,8 @@ static void emptyDb()
 
 static void freeClientArgv(rcmdClient *c) 
 {
-  for (int j = 0; j < c->argc; j++)
+  int j;
+  for (j = 0; j < c->argc; j++)
     decrRefCount(c->argv[j]);
   c->argc = 0;
 }
@@ -740,6 +744,7 @@ static int saveDb(char *filename)
   uint8_t type;
   FILE *fp;
   char tmpfile[256];
+  int j;
 
   snprintf(tmpfile, 256, "temp-%d.%ld.db", (int)time(NULL), (long int)random());
   fp = fopen(tmpfile, "w");
@@ -749,7 +754,7 @@ static int saveDb(char *filename)
   }
   if (fwrite("RCMD0000", 8, 1, fp) == 0)
     goto werr;
-  for (int j = 0; j < server.dbnum; j++) {
+  for (j = 0; j < server.dbnum; j++) {
     dict *d = server.dict[j];
     if (dictGetHashTableUsed(d) == 0)
       continue;

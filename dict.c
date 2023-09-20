@@ -77,6 +77,7 @@ static int _dictExpand(dict *ht, unsigned int size)
 {
   dict newht;
   dictEntry * de, *deNext;
+  unsigned int i;
 
   if (ht->used > size)
     return DICT_ERR;
@@ -91,7 +92,7 @@ static int _dictExpand(dict *ht, unsigned int size)
 
   memset(newht.table, 0, realsize * sizeof(dictEntry *));
 
-  for (unsigned int i = 0; i < ht->size && ht->used > 0; i++) {
+  for (i = 0; i < ht->size && ht->used > 0; i++) {
     de = ht->table[i];
     if (de == NULL) continue;
 
@@ -230,7 +231,8 @@ int dictResize(dict *ht)
 
 void dictEmpty(dict *ht)
 {
-  for (unsigned int i = 0; i < ht->size && ht->used > 0; i++) {
+  unsigned int i;
+  for (i = 0; i < ht->size && ht->used > 0; i++) {
     dictEntry *de, *nextDe;
 
     if ((de = ht->table[i]) == NULL)
