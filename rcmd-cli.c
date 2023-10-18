@@ -1,9 +1,21 @@
+#if ! defined(__sun)
+        /* Prevents ptsname() declaration being visible on Solaris 8 */
+#if ! defined(_XOPEN_SOURCE) || _XOPEN_SOURCE < 600
+#define _XOPEN_SOURCE 600
+#endif
+#endif
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <termios.h>
+#include <sys/ioctl.h>
+#include <sys/types.h>
+#include <fcntl.h>
+#include <sys/select.h>
 
 #include "sds.h"
 #include "aUnixDomain.h"
@@ -13,12 +25,98 @@
 #define RCMD_RETURN_RESULT 1
 #define RCMD_NOT_RETURN_RESULT 2
 
+#define MAX_SNAME 500
+
 typedef sds rcmdProc(list *rcmdList, list *execList);
 struct rcmdCommand {
   char *name;
   rcmdProc *proc;
   int flags;
 };
+
+/* ============================== pty ============================== */
+
+struct termios ttyOrig;
+
+static int ttySetRaw(int fd, struct termios *prevTermios)
+{
+  struct termios t;
+  
+  if (tcgetattr(fd, &t) == -1)
+    return -1;
+  
+  if (prevTermios != NULL)
+    *prevTermios = t;
+  
+  t.c_lflag &= ~(ICANON | ISIG | IEXTEN | ECHO);
+  /* Noncanonical mode, disable signals, extended
+     input processing, and echoing */
+  
+  t.c_iflag &= ~(BRKINT | ICRNL | IGNBRK | IGNCR | INLCR |
+		 INPCK | ISTRIP | IXON | PARMRK);
+  /* Disable special handling of CR, NL, and BREAK.
+     No 8th-bit stripping or parity error handling.
+     Disable START/STOP output flow control. */
+  
+  t.c_oflag &= ~OPOST;                /* Disable all output processing */
+  
+  t.c_cc[VMIN] = 1;                   /* Character-at-a-time input */
+  t.c_cc[VTIME] = 0;                  /* with blocking */
+  
+  if (tcsetattr(fd, TCSAFLUSH, &t) == -1)
+    return -1;
+  
+  return 0;
+}
+
+static void ttyReset(void)
+{
+  if (tcsetattr(STDIN_FILENO, TCSANOW, &ttyOrig) == -1) {
+    printf("tcsetattr() error\n");
+    exit(1);
+  }
+}
+
+static int ptyMasterOpen(char *slaveName, size_t snLen)
+{
+  int masterFd, savedErrno;
+  char *p;
+
+  masterFd = open("/dev/ptmx", O_RDWR | O_NOCTTY);
+  if (masterFd == -1)
+    return -1;
+
+  if (grantpt(masterFd) == -1) {
+    savedErrno = errno;
+    close(masterFd);
+    errno = savedErrno;
+    return -1;
+  }
+
+  if (unlockpt(masterFd) == -1) {
+    savedErrno = errno;
+    close(masterFd);
+    errno = savedErrno;
+    return -1;
+  }
+
+  p = ptsname(masterFd);
+  if (p == NULL) {
+    savedErrno = errno;
+    close(masterFd);
+    errno = savedErrno;
+    return -1;
+  }
+
+  if (strlen(p) < snLen) {
+    strncpy(slaveName, p, snLen);
+  } else {
+    close(masterFd);
+    errno = EOVERFLOW;
+    return -1;
+  }
+  return masterFd;
+}
 
 /* ============================== Prototypes ============================== */
 
@@ -176,6 +274,149 @@ static void parseArgs(int argc, char **argv, list* rcmdList, list* execList)
 
 static sds run(list *execList)
 {
+  char slaveName[MAX_SNAME] = {'\0'};
+  struct winsize ws;
+  fd_set inFds;
+  char buf[BUF_SIZE];
+  int nread, masterFd, slaveFd;
+  pid_t pid;
+  
+  if (tcgetattr(STDIN_FILENO, &ttyOrig) == -1) {
+    printf("tcgetattr() error\n");
+    exit(1);
+  }
+  if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) < 0) {
+    printf("ioctl() error\n");
+    exit(1);
+  }
+
+  masterFd = ptyMasterOpen(&slaveName, MAX_SNAME);
+  if (masterFd == -1) {
+    printf("ptyMasterOpen() error\n");
+    exit(1);
+  }
+  if (slaveName[0] == '\0') {
+    close(masterFd);
+    printf("ptyMasterOpen() error\n");
+    exit(1);
+  }
+
+  pid = fork();
+
+  if (pid == -1) {
+    printf("fork() error\n");
+    exit(1);
+  }
+
+  if (pid == 0) {		/* child process */
+    if (setsid() == -1) {
+      printf("setsid() error\n");
+      exit(1);
+    }
+
+    close(masterFd);
+
+    slaveFd = open(slaveName, O_RDWR);
+    if (slaveFd == -1) {
+      printf("open-slave error\n");
+      exit(1);
+    }
+
+    if (ioctl(slaveFd, TIOCSCTTY, 0) == -1) {
+      printf("ioctl-TIOCSCTTY error\n");
+      exit(1);
+    }
+
+    if (tcsetattr(slaveFd, TCSANOW, &ttyOrig) == -1) {
+      printf("tcsetattr() error\n");
+      exit(1);
+    }
+
+    if (ioctl(slaveFd, TIOCSWINSZ, &ws) == -1) {
+      printf("ioctl-TIOCSWINZ error\n");
+      exit(1);
+    }
+
+    if (dup2(slaveFd, STDIN_FILENO) != STDIN_FILENO) {
+      printf("dup2-STDIN_FILENO error\n");
+      exit(1);
+    }
+
+    if (dup2(slaveFd, STDOUT_FILENO) != STDOUT_FILENO) {
+      printf("dup2-STDOUT_FILENO error\n");
+      exit(1);
+    }
+
+    if (dup2(slaveFd, STDERR_FILENO) != STDERR_FILENO) {
+      printf("dup2-STDERR_FILENO error\n");
+      exit(1);
+    }
+
+    if (slaveFd > STDERR_FILENO)
+      close(slaveFd);
+
+    char **args = malloc(sizeof(char *) * (listLength(execList) + 1)); 
+    unsigned int i; 
+    
+    for (i = 0; i < listLength(execList); i++) 
+      args[i] = (char*)listNodeValue(listIndex(execList, i)); 
+    args[i] = NULL; 
+    
+    if ((execvp(args[0], args)) == -1) { 
+      printf("%s", strerror(errno)); 
+      exit(1); 
+    }
+  }
+
+  ttySetRaw(STDIN_FILENO, &ttyOrig);
+  
+  if (atexit(ttyReset) != 0) {
+    printf("atexit() error\n");
+    exit(1);
+  }
+
+  sds retChar = sdsEmpty();
+  
+  while (1) {
+    FD_ZERO(&inFds);
+    FD_SET(STDIN_FILENO, &inFds);
+    FD_SET(masterFd, &inFds);
+
+    if (select(masterFd + 1, &inFds, NULL, NULL, NULL) == -1) {
+      printf("select() error\n");
+      exit(1);
+    }
+
+    if (FD_ISSET(STDIN_FILENO, &inFds)) {
+      nread = read(STDIN_FILENO, buf, BUF_SIZE);
+      if (nread <= 0)
+	break;
+
+      if (write(masterFd, buf, nread) != nread) {
+	printf("write() error\n");
+	exit(1);
+      }
+    }
+
+    if (FD_ISSET(masterFd, &inFds)) {
+      nread = read(masterFd, buf, BUF_SIZE);
+      if (nread <= 0)
+	break;
+
+      if (write(STDOUT_FILENO, buf, nread) != nread) {
+	printf("write-STDOUT_FILENO error\n");
+	exit(1);
+      }
+      retChar = sdsCatLen(retChar, buf, nread);
+    }
+  }
+
+  return retChar;
+}
+
+/*
+static sds run(list *execList)
+{
   int fds[2];
   pid_t pid;
   sds retChar = sdsEmpty();
@@ -221,24 +462,10 @@ static sds run(list *execList)
 	break;
       }
     }
-    /*    int status;
-    char buf[BUF_SIZE];
-    int nread = 0;
-    buf[nread] = '\0';
-    nread = read(fds[0], buf, BUF_SIZE);
-    while (nread == BUF_SIZE || !waitpid(pid, &status, WNOHANG)) {
-      sleep(1);
-      printf("%s", buf);
-      retChar = sdsCat(retChar, buf);
-      nread = read(fds[0], buf, BUF_SIZE);
-    }
-    buf[nread] = '\0';
-    printf("%s\n", buf);
-    retChar = sdsCat(retChar, buf);
-    */
   }
   return retChar;
 }
+*/
 
 static struct rcmdCommand *lookupCommand(char *name)
 {

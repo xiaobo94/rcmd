@@ -5,9 +5,9 @@ OBJ = adlist.o ae.o aUnixDomain.o dict.o rcmd.o sds.o
 CLIOBJ = aUnixDomain.o adlist.o sds.o rcmd-cli.o
 
 PRGNAME = rcmd-server
-CLIPRGNAME = rcmd-cli
+CLIPRGNAME = rcmd
 
-all : rcmd-server rcmd-cli
+all : rcmd-server rcmd
 
 adlist.o : adlist.c adlist.h
 ae.o : ae.c ae.h
@@ -18,7 +18,7 @@ rcmd.o : rcmd.c ae.h sds.h aUnixDomain.h dict.h adlist.h
 
 rcmd-server : $(OBJ)
 	$(CC) -o $(PRGNAME) $(CCOPT) $(OBJ)
-rcmd-cli : $(CLIOBJ)
+rcmd : $(CLIOBJ)
 	$(CC) -o $(CLIPRGNAME) $(CCOPT) $(CLIOBJ)
 
 clean :
