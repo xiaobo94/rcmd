@@ -1,3 +1,3 @@
 *.o
 rcmd-server
-rcmd-cli
+rcmd
