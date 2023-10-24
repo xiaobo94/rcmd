@@ -558,8 +558,6 @@ int cliSendCommand(list* rcmdList, list* execList)
   retval = cliReadInlineReply(servfd);
   
   sdsFree(cmd);
-  listRelease(rcmdList);
-  listRelease(execList);
   free(rcmdList);
   free(execList);
   close(servfd);
