@@ -96,6 +96,7 @@ int aUnixDomainConnect(void)
   memset(&addr, 0, sizeof(struct sockaddr_un));
   addr.sun_family = AF_UNIX;
   strncpy(&addr.sun_path[1], sockFile, sizeof(addr.sun_path) - 2);
+  sdsFree(sockFile);
 
   if (connect(servfd, (struct sockaddr *) &addr, sizeof(struct sockaddr_un)) == -1)
     errExit("connect() error");

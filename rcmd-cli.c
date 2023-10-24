@@ -514,6 +514,7 @@ int cliReadInlineReply(int fd)
   if (reply == NULL) return 1;
   int num = atoi(reply), nread;
   char buf[BUF_SIZE];
+  sdsFree(reply);
   reply = sdsEmpty();
 
   while (num) {
@@ -557,6 +558,10 @@ int cliSendCommand(list* rcmdList, list* execList)
   retval = cliReadInlineReply(servfd);
   
   sdsFree(cmd);
+  listRelease(rcmdList);
+  listRelease(execList);
+  free(rcmdList);
+  free(execList);
   close(servfd);
   return retval;
 }
