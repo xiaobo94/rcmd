@@ -546,6 +546,8 @@ int cliSendCommand(list* rcmdList, list* execList)
   
   if (!rc) {
     fprintf(stderr, "Unknown command '%s'.\n", soft);
+    listRelease(rcmdList);
+    listRelease(execList);
     return 1;
   }
 
@@ -558,8 +560,8 @@ int cliSendCommand(list* rcmdList, list* execList)
   retval = cliReadInlineReply(servfd);
   
   sdsFree(cmd);
-  free(rcmdList);
-  free(execList);
+  listRelease(rcmdList);
+  listRelease(execList);
   close(servfd);
   return retval;
 }

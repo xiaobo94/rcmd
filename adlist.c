@@ -16,17 +16,15 @@ list* listCreate(void)
 
 void listRelease(list *list)
 {
-  listNode *node = list->head, *prev;
+  listNode *node = list->tail, *prev;
 
-  if (node == NULL)
-    free(list);
-  
   while (node) {
     prev = node->prev;
     if (list->free) list->free(node->value);
-    free(node);
+    else free(node);
     node = prev;
   }
+  free(list);
   return;
 }
 
@@ -63,7 +61,6 @@ list *listAddNodeTail(list *list, void *value)
     list->head = list->tail = node;
     node->prev = node->next = NULL;
   } else {
-//    node->next = NULL;
     node->prev = list->tail;
     node->next = NULL;
     list->tail->next = node;
